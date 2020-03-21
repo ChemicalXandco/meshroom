@@ -1,4 +1,4 @@
-__version__ = "1.0"
+__version__ = "2.0"
 
 import json
 import os
@@ -60,6 +60,27 @@ class StructureFromMotion(desc.CommandLineNode):
             values=['acransac', 'ransac', 'lsmeds', 'loransac', 'maxconsensus'],
             exclusive=True,
             uid=[0],
+            advanced=True,
+        ),
+        desc.IntParam(
+            name='localizerEstimatorMaxIterations',
+            label='Localizer Max Ransac Iterations',
+            description='Maximum number of iterations allowed in ransac step.',
+            value=4096,
+            range=(1, 20000, 1),
+            uid=[0],
+            advanced=True,
+        ),
+        desc.FloatParam(
+            name='localizerEstimatorError',
+            label='Localizer Max Ransac Error',
+            description='Maximum error (in pixels) allowed for camera localization (resectioning).\n'
+                        'If set to 0, it will select a threshold according to the localizer estimator used\n'
+                        '(if ACRansac, it will analyze the input data to select the optimal value).',
+            value=0.0,
+            range=(0.0, 100.0, 0.1),
+            uid=[0],
+            advanced=True,
         ),
        desc.BoolParam(
             name='lockScenePreviouslyReconstructed',
@@ -83,6 +104,7 @@ class StructureFromMotion(desc.CommandLineNode):
             value=1,
             range=(2, 10, 1),
             uid=[0],
+            advanced=True,
         ),
         desc.IntParam(
             name='maxNumberOfMatches',
@@ -90,6 +112,15 @@ class StructureFromMotion(desc.CommandLineNode):
             description='Maximum number of matches per image pair (and per feature type). \n'
                         'This can be useful to have a quick reconstruction overview. \n'
                         '0 means no limit.',
+            value=0,
+            range=(0, 50000, 1),
+            uid=[0],
+        ),
+        desc.IntParam(
+            name='minNumberOfMatches',
+            label='Minimum Number of Matches',
+            description='Minimum number of matches per image pair (and per feature type). \n'
+                        'This can be useful to have a meaningful reconstruction with accurate keypoints. 0 means no limit.',
             value=0,
             range=(0, 50000, 1),
             uid=[0],
@@ -112,6 +143,7 @@ class StructureFromMotion(desc.CommandLineNode):
             value=2,
             range=(2, 10, 1),
             uid=[0],
+            advanced=True,
         ),
         desc.FloatParam(
             name='minAngleForTriangulation',
@@ -120,6 +152,7 @@ class StructureFromMotion(desc.CommandLineNode):
             value=3.0,
             range=(0.1, 10, 0.1),
             uid=[0],
+            advanced=True,
         ),
         desc.FloatParam(
             name='minAngleForLandmark',
@@ -128,6 +161,7 @@ class StructureFromMotion(desc.CommandLineNode):
             value=2.0,
             range=(0.1, 10, 0.1),
             uid=[0],
+            advanced=True,
         ),
         desc.FloatParam(
             name='maxReprojectionError',
@@ -136,6 +170,7 @@ class StructureFromMotion(desc.CommandLineNode):
             value=4.0,
             range=(0.1, 10, 0.1),
             uid=[0],
+            advanced=True,
         ),
         desc.FloatParam(
             name='minAngleInitialPair',
@@ -144,6 +179,7 @@ class StructureFromMotion(desc.CommandLineNode):
             value=5.0,
             range=(0.1, 10, 0.1),
             uid=[0],
+            advanced=True,
         ),
         desc.FloatParam(
             name='maxAngleInitialPair',
@@ -152,6 +188,7 @@ class StructureFromMotion(desc.CommandLineNode):
             value=40.0,
             range=(0.1, 60, 0.1),
             uid=[0],
+            advanced=True,
         ),
         desc.BoolParam(
             name='useOnlyMatchesFromInputFolder',
@@ -160,6 +197,32 @@ class StructureFromMotion(desc.CommandLineNode):
                         'Matches folders previously added to the SfMData file will be ignored.',
             value=False,
             uid=[],
+            advanced=True,
+        ),
+        desc.BoolParam(
+            name='useRigConstraint',
+            label='Use Rig Constraint',
+            description='Enable/Disable rig constraint.',
+            value=True,
+            uid=[0],
+            advanced=True,
+        ),
+        desc.BoolParam(
+            name='lockAllIntrinsics',
+            label='Force Lock of All Intrinsic Camera Parameters.',
+            description='Force to keep constant all the intrinsics parameters of the cameras (focal length, \n'
+                        'principal point, distortion if any) during the reconstruction.\n'
+                        'This may be helpful if the input cameras are already fully calibrated.',
+            value=False,
+            uid=[0],
+        ),
+        desc.BoolParam(
+            name='filterTrackForks',
+            label='Filter Track Forks',
+            description='Enable/Disable the track forks removal. A track contains a fork when incoherent matches \n'
+                        'lead to multiple features in the same image for a single track. \n',
+            value=True,
+            uid=[0],
         ),
         desc.File(
             name='initialPairA',
@@ -183,6 +246,7 @@ class StructureFromMotion(desc.CommandLineNode):
             values=('.abc', '.ply'),
             exclusive=True,
             uid=[],
+            advanced=True,
         ),
         desc.ChoiceParam(
             name='verboseLevel',
@@ -220,19 +284,20 @@ class StructureFromMotion(desc.CommandLineNode):
     ]
 
     @staticmethod
-    def getViewsAndPoses(node):
+    def getResults(node):
         """
-        Parse SfM result and return views and poses as two dict with viewId and poseId as keys.
+        Parse SfM result and return views, poses and intrinsics as three dicts with viewId, poseId and intrinsicId as keys.
         """
         reportFile = node.outputViewsAndPoses.value
         if not os.path.exists(reportFile):
-            return {}, {}
+            return {}, {}, {}
 
         with open(reportFile) as jsonFile:
             report = json.load(jsonFile)
 
         views = dict()
         poses = dict()
+        intrinsics = dict()
 
         for view in report['views']:
             views[view['viewId']] = view
@@ -240,4 +305,7 @@ class StructureFromMotion(desc.CommandLineNode):
         for pose in report['poses']:
             poses[pose['poseId']] = pose['pose']
 
-        return views, poses
+        for intrinsic in report['intrinsics']:
+            intrinsics[intrinsic['intrinsicId']] = intrinsic
+
+        return views, poses, intrinsics

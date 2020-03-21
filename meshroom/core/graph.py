@@ -234,7 +234,15 @@ class Graph(BaseObject):
         return Graph.IO.getFeaturesForVersion(self.header.get(Graph.IO.Keys.FileVersion, "0.0"))
 
     @Slot(str)
-    def load(self, filepath):
+    def load(self, filepath, setupProjectFile=True):
+        """
+        Load a meshroom graph ".mg" file.
+
+        Args:
+            filepath: project filepath to load
+            setupProjectFile: Store the reference to the project file and setup the cache directory.
+                              If false, it only loads the graph of the project file as a template.
+        """
         self.clear()
         with open(filepath) as jsonFile:
             fileData = json.load(jsonFile)
@@ -265,8 +273,9 @@ class Graph(BaseObject):
                 # Add node to the graph with raw attributes values
                 self._addNode(n, nodeName)
 
-        # Update filepath related members
-        self._setFilepath(filepath)
+        if setupProjectFile:
+            # Update filepath related members
+            self._setFilepath(filepath)
 
         # Create graph edges by resolving attributes expressions
         self._applyExpr()
@@ -410,7 +419,7 @@ class Graph(BaseObject):
     def removeNode(self, nodeName):
         """
         Remove the node identified by 'nodeName' from the graph
-        and return in and out edges removed by this operation in two dicts {dstAttr.fullName(), srcAttr.fullName()}
+        and return in and out edges removed by this operation in two dicts {dstAttr.getFullName(), srcAttr.getFullName()}
         """
         node = self.node(nodeName)
         inEdges = {}
@@ -420,10 +429,10 @@ class Graph(BaseObject):
         with GraphModification(self):
             for edge in self.nodeOutEdges(node):
                 self.removeEdge(edge.dst)
-                outEdges[edge.dst.fullName()] = edge.src.fullName()
+                outEdges[edge.dst.getFullName()] = edge.src.getFullName()
             for edge in self.nodeInEdges(node):
                 self.removeEdge(edge.dst)
-                inEdges[edge.dst.fullName()] = edge.src.fullName()
+                inEdges[edge.dst.getFullName()] = edge.src.getFullName()
 
             self._nodes.remove(node)
             self.update()
@@ -570,7 +579,7 @@ class Graph(BaseObject):
         if srcAttr.node.graph != self or dstAttr.node.graph != self:
             raise RuntimeError('The attributes of the edge should be part of a common graph.')
         if dstAttr in self.edges.keys():
-            raise RuntimeError('Destination attribute "{}" is already connected.'.format(dstAttr.fullName()))
+            raise RuntimeError('Destination attribute "{}" is already connected.'.format(dstAttr.getFullName()))
         edge = Edge(srcAttr, dstAttr)
         self.edges.add(edge)
         self.markNodesDirty(dstAttr.node)
@@ -586,7 +595,7 @@ class Graph(BaseObject):
     @changeTopology
     def removeEdge(self, dstAttr):
         if dstAttr not in self.edges.keys():
-            raise RuntimeError('Attribute "{}" is not connected'.format(dstAttr.fullName()))
+            raise RuntimeError('Attribute "{}" is not connected'.format(dstAttr.getFullName()))
         self.edges.pop(dstAttr)
         self.markNodesDirty(dstAttr.node)
         dstAttr.valueChanged.emit()
@@ -896,7 +905,7 @@ class Graph(BaseObject):
     def asString(self):
         return str(self.toDict())
 
-    def save(self, filepath=None):
+    def save(self, filepath=None, setupProjectFile=True):
         path = filepath or self._filepath
         if not path:
             raise ValueError("filepath must be specified for unsaved files.")
@@ -920,7 +929,7 @@ class Graph(BaseObject):
         with open(path, 'w') as jsonFile:
             json.dump(data, jsonFile, indent=4)
 
-        if path != self._filepath:
+        if path != self._filepath and setupProjectFile:
             self._setFilepath(path)
 
     def _setFilepath(self, filepath):
@@ -930,7 +939,9 @@ class Graph(BaseObject):
         Args:
             filepath: the graph file path
         """
-        assert os.path.isfile(filepath)
+        if not os.path.isfile(filepath):
+            self._unsetFilepath()
+            return
 
         if self._filepath == filepath:
             return
@@ -940,6 +951,12 @@ class Graph(BaseObject):
         #  * graph name if the basename of the graph file
         self.name = os.path.splitext(os.path.basename(filepath))[0]
         self.cacheDir = os.path.join(os.path.abspath(os.path.dirname(filepath)), meshroom.core.cacheFolderName)
+        self.filepathChanged.emit()
+
+    def _unsetFilepath(self):
+        self._filepath = ""
+        self.name = ""
+        self.cacheDir = meshroom.core.defaultCacheFolder
         self.filepathChanged.emit()
 
     def updateInternals(self, startNodes=None, force=False):
@@ -999,10 +1016,16 @@ class Graph(BaseObject):
         for chunk in self.iterChunksByStatus(Status.RUNNING):
             chunk.stopProcess()
 
+    @Slot()
     def clearSubmittedNodes(self):
         """ Reset the status of already submitted nodes to Status.NONE """
         for node in self.nodes:
             node.clearSubmittedChunks()
+
+    @Slot(Node)
+    def clearDataFrom(self, startNode):
+        for node in self.nodesFromNode(startNode)[0]:
+            node.clearData()
 
     def iterChunksByStatus(self, status):
         """ Iterate over NodeChunks with the given status """
@@ -1072,6 +1095,7 @@ def loadGraph(filepath):
     """
     graph = Graph("")
     graph.load(filepath)
+    graph.update()
     return graph
 
 
@@ -1143,9 +1167,15 @@ def submitGraph(graph, submitter, toNodes=None):
     logging.info("Nodes to process: {}".format(edgesToProcess))
     logging.info("Edges to process: {}".format(edgesToProcess))
 
-    sub = meshroom.core.submitters.get(submitter, None)
+    sub = None
+    if submitter:
+        sub = meshroom.core.submitters.get(submitter, None)
+    elif len(meshroom.core.submitters) == 1:
+        # if only one submitter available use it
+        sub = meshroom.core.submitters.values()[0]
     if sub is None:
-        raise RuntimeError("Unknown Submitter : " + submitter)
+        raise RuntimeError("Unknown Submitter: '{submitter}'. Available submitters are: '{allSubmitters}'.".format(
+            submitter=submitter, allSubmitters=str(meshroom.core.submitters.keys())))
 
     try:
         res = sub.submit(nodesToProcess, edgesToProcess, graph.filepath)

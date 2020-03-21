@@ -44,7 +44,7 @@ FloatingPane {
     function getGPSCoordinates(metadata)
     {
         // GPS data available
-        if(metadata["GPS:Longitude"] != undefined && metadata["GPS:Latitude"] != undefined)
+        if(metadata && metadata["GPS:Longitude"] != undefined && metadata["GPS:Latitude"] != undefined)
         {
             var latitude = gpsMetadataToCoordinates(metadata["GPS:Latitude"], metadata["GPS:LatitudeRef"])
             var longitude = gpsMetadataToCoordinates(metadata["GPS:Longitude"], metadata["GPS:LongitudeRef"])
@@ -121,17 +121,9 @@ FloatingPane {
     ColumnLayout {
         anchors.fill: parent
 
-        // Search toolbar
-        RowLayout {
-            Label {
-                text: MaterialIcons.search
-                font.family: MaterialIcons.fontFamily
-            }
-            TextField {
-                id: filter
-                Layout.fillWidth: true
-                z: 2
-            }
+        SearchBar {
+            id: searchBar
+            Layout.fillWidth: true
         }
 
         // Metadata ListView
@@ -148,7 +140,7 @@ FloatingPane {
                 model: metadataModel
                 sortRole: "raw"
                 filterRole: "raw"
-                filterValue: filter.text
+                filterValue: searchBar.text
                 delegate: RowLayout {
                     width: parent.width
                     Label {

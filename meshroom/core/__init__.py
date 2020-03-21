@@ -13,6 +13,14 @@ import pkgutil
 
 import sys
 
+try:
+    # for cx_freeze
+    import encodings.ascii
+    import encodings.idna
+    import encodings.utf_8
+except:
+    pass
+
 from meshroom.core.submitter import BaseSubmitter
 from . import desc
 
@@ -78,9 +86,9 @@ def loadPlugins(folder, packageName, classType):
                 errors.append('  * {}: {}'.format(pluginName, str(e)))
 
     if errors:
-        logging.warning('== The following plugins could not be loaded ==\n'
-                        '{}\n'
-                        .format('\n'.join(errors)))
+        logging.warning('== The following "{package}" plugins could not be loaded ==\n'
+                        '{errorMsg}\n'
+                        .format(package=packageName, errorMsg='\n'.join(errors)))
     return pluginTypes
 
 
@@ -232,7 +240,7 @@ def loadAllNodes(folder):
             nodeTypes = loadNodes(folder, package)
             for nodeType in nodeTypes:
                 registerNodeType(nodeType)
-            print('Plugins loaded: ', ', '.join([nodeType.__name__ for nodeType in nodeTypes]))
+            logging.debug('Plugins loaded: ', ', '.join([nodeType.__name__ for nodeType in nodeTypes]))
 
 
 def registerSubmitter(s):
@@ -252,10 +260,7 @@ meshroomFolder = os.path.dirname(os.path.dirname(__file__))
 # - Nodes
 loadAllNodes(folder=os.path.join(meshroomFolder, 'nodes'))
 # - Submitters
-subs = loadSubmitters(meshroomFolder, 'submitters')
-# -  additional 3rd party submitters
-if "MESHROOM_SUBMITTERS_PATH" in os.environ:
-    subs += loadSubmitters(os.environ["MESHROOM_SUBMITTERS_PATH"], 'submitters')
+subs = loadSubmitters(os.environ.get("MESHROOM_SUBMITTERS_PATH", meshroomFolder), 'submitters')
 
 for sub in subs:
     registerSubmitter(sub())

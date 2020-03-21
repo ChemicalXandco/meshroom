@@ -127,6 +127,92 @@ class StatusData:
         self.sessionUid = d.get('sessionUid', '')
 
 
+class LogManager:
+    dateTimeFormatting = '%H:%M:%S'
+
+    def __init__(self, chunk):
+        self.chunk = chunk
+        self.logger = logging.getLogger(chunk.node.getName())
+
+    class Formatter(logging.Formatter):
+        def format(self, record):
+            # Make level name lower case
+            record.levelname = record.levelname.lower()
+            return logging.Formatter.format(self, record)
+
+    def configureLogger(self):
+        for handler in self.logger.handlers[:]:
+            self.logger.removeHandler(handler)
+        handler = logging.FileHandler(self.chunk.logFile)
+        formatter = self.Formatter('[%(asctime)s.%(msecs)03d][%(levelname)s] %(message)s', self.dateTimeFormatting)
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
+    def start(self, level):
+        # Clear log file
+        open(self.chunk.logFile, 'w').close()
+        
+        self.configureLogger()
+        self.logger.setLevel(self.textToLevel(level))
+        self.progressBar = False
+
+    def end(self):
+        for handler in self.logger.handlers[:]:
+            # Stops the file being locked
+            handler.close()
+
+    def makeProgressBar(self, end, message=''):
+        assert end > 0
+        assert not self.progressBar
+
+        self.progressEnd = end
+        self.currentProgressTics = 0
+        self.progressBar = True
+        
+        with open(self.chunk.logFile, 'a') as f:
+            if message:
+                f.write(message+'\n')
+            f.write('0%   10   20   30   40   50   60   70   80   90   100%\n')
+            f.write('|----|----|----|----|----|----|----|----|----|----|\n\n')
+            
+            f.close()
+            
+        with open(self.chunk.logFile, 'r') as f:
+            content = f.read()
+            self.progressBarPosition = content.rfind('\n')
+            
+            f.close()
+
+    def updateProgressBar(self, value):
+        assert self.progressBar
+        assert value <= self.progressEnd
+
+        tics = round((value/self.progressEnd)*51)
+
+        with open(self.chunk.logFile, 'r+') as f:
+            text = f.read()
+            for i in range(tics-self.currentProgressTics):
+                text = text[:self.progressBarPosition]+'*'+text[self.progressBarPosition:]
+            f.seek(0)
+            f.write(text)
+            f.close()
+
+        self.currentProgressTics = tics
+
+    def completeProgressBar(self):
+        assert self.progressBar
+
+        self.progressBar = False
+
+    def textToLevel(self, text):
+        if text == 'critical': return logging.CRITICAL
+        elif text == 'error': return logging.ERROR
+        elif text == 'warning': return logging.WARNING
+        elif text == 'info': return logging.INFO
+        elif text == 'debug': return logging.DEBUG
+        else: return logging.NOTSET
+
+
 runningProcesses = {}
 
 
@@ -142,8 +228,10 @@ class NodeChunk(BaseObject):
         super(NodeChunk, self).__init__(parent)
         self.node = node
         self.range = range
+        self.logManager = LogManager(self)
         self.status = StatusData(node.name, node.nodeType, node.packageName, node.packageVersion)
         self.statistics = stats.Statistics()
+        self.statusFileLastModTime = -1
         self._subprocess = None
         # notify update in filepaths when node's internal folder changes
         self.node.internalFolderChanged.connect(self.nodeFolderChanged)
@@ -164,6 +252,10 @@ class NodeChunk(BaseObject):
         return self.status.status.name
 
     @property
+    def logger(self):
+        return self.logManager.logger
+
+    @property
     def execModeName(self):
         return self.status.execMode.name
 
@@ -175,11 +267,13 @@ class NodeChunk(BaseObject):
         oldStatus = self.status.status
         # No status file => reset status to Status.None
         if not os.path.exists(statusFile):
+            self.statusFileLastModTime = -1
             self.status.reset()
         else:
             with open(statusFile, 'r') as jsonFile:
                 statusData = json.load(jsonFile)
             self.status.fromDict(statusData)
+            self.statusFileLastModTime = os.path.getmtime(statusFile)
         if oldStatus != self.status.status:
             self.statusChanged.emit()
 
@@ -282,6 +376,7 @@ class NodeChunk(BaseObject):
             # ask and wait for the stats thread to stop
             self.statThread.stopRequest()
             self.statThread.join()
+            self.statistics = stats.Statistics()
             del runningProcesses[self.name]
 
         self.upgradeStatusTo(Status.SUCCESS)
@@ -337,8 +432,8 @@ class BaseNode(BaseObject):
         self.packageName = self.packageVersion = ""
         self._internalFolder = ""
 
-        self._name = None  # type: str
-        self.graph = None  # type: Graph
+        self._name = None
+        self.graph = None
         self.dirty = True  # whether this node's outputs must be re-evaluated on next Graph update
         self._chunks = ListModel(parent=self)
         self._uids = dict()
@@ -361,6 +456,14 @@ class BaseNode(BaseObject):
 
     def getName(self):
         return self._name
+
+    def getLabel(self):
+        """
+        Returns:
+            str: the high-level label of this node
+        """
+        t, idx = self._name.split("_")
+        return "{}{}".format(t, idx if int(idx) > 1 else "")
 
     @property
     def packageFullName(self):
@@ -450,7 +553,7 @@ class BaseNode(BaseObject):
             self._cmdVars[name] = '--{name} {value}'.format(name=name, value=v)
             self._cmdVars[name + 'Value'] = str(v)
 
-            if v is not None and v is not '':
+            if v:
                 self._cmdVars[attr.attributeDesc.group] = self._cmdVars.get(attr.attributeDesc.group, '') + \
                                                           ' ' + self._cmdVars[name]
 
@@ -462,6 +565,11 @@ class BaseNode(BaseObject):
         for name, attr in self._attributes.objects.items():
             if attr.isInput:
                 continue  # skip inputs
+
+            # Only consider File attributes for command output parameters
+            if not isinstance(attr.attributeDesc, desc.File):
+                continue
+
             attr.value = attr.attributeDesc.value.format(**self._cmdVars)
             attr._invalidationValue = attr.attributeDesc.value.format(**cmdVarsNoCache)
             v = attr.getValueStr()
@@ -469,13 +577,13 @@ class BaseNode(BaseObject):
             self._cmdVars[name] = '--{name} {value}'.format(name=name, value=v)
             self._cmdVars[name + 'Value'] = str(v)
 
-            if v is not None and v is not '':
+            if v:
                 self._cmdVars[attr.attributeDesc.group] = self._cmdVars.get(attr.attributeDesc.group, '') + \
                                                           ' ' + self._cmdVars[name]
 
     @property
     def isParallelized(self):
-        return bool(self.nodeDesc.parallelization)
+        return bool(self.nodeDesc.parallelization) if meshroom.useMultiChunks else False
 
     @property
     def nbParallelizationBlocks(self):
@@ -488,6 +596,10 @@ class BaseNode(BaseObject):
             if chunk.status.status != status:
                 return False
         return True
+
+    @Slot(result=bool)
+    def isComputed(self):
+        return self.hasStatus(Status.SUCCESS)
 
     @Slot()
     def clearData(self):
@@ -543,6 +655,8 @@ class BaseNode(BaseObject):
         Args:
             cacheDir (str): (optional) override graph's cache directory with custom path
         """
+        if self.nodeDesc:
+            self.nodeDesc.update(self)
         # Update chunks splitting
         self._updateChunks()
         # Retrieve current internal folder (if possible)
@@ -557,6 +671,8 @@ class BaseNode(BaseObject):
         }
         self._computeUids()
         self._buildCmdVars()
+        if self.nodeDesc:
+            self.nodeDesc.postUpdate(self)
         # Notify internal folder change if needed
         if self.internalFolder != folder:
             self.internalFolderChanged.emit()
@@ -592,15 +708,30 @@ class BaseNode(BaseObject):
     def endSequence(self):
         pass
 
-    def getStatus(self):
-        return self.status
+    def getGlobalStatus(self):
+        """
+        Get node global status based on the status of its chunks.
+
+        Returns:
+            Status: the node global status
+        """
+        chunksStatus = [chunk.status.status for chunk in self._chunks]
+
+        anyOf = (Status.ERROR, Status.STOPPED, Status.KILLED,
+                 Status.RUNNING, Status.SUBMITTED)
+        allOf = (Status.SUCCESS,)
+
+        for status in anyOf:
+            if any(s == status for s in chunksStatus):
+                return status
+        for status in allOf:
+            if all(s == status for s in chunksStatus):
+                return status
+
+        return Status.NONE
 
     def getChunks(self):
         return self._chunks
-
-    @property
-    def statusNames(self):
-        return [s.status.name for s in self.status]
 
     def getSize(self):
         return self._size
@@ -615,6 +746,7 @@ class BaseNode(BaseObject):
         return self.name
 
     name = Property(str, getName, constant=True)
+    label = Property(str, getLabel, constant=True)
     nodeType = Property(str, nodeType.fget, constant=True)
     positionChanged = Signal()
     position = Property(Variant, position.fget, position.fset, notify=positionChanged)
@@ -630,6 +762,8 @@ class BaseNode(BaseObject):
     chunks = Property(Variant, getChunks, notify=chunksChanged)
     sizeChanged = Signal()
     size = Property(int, getSize, notify=sizeChanged)
+    globalStatusChanged = Signal()
+    globalStatus = Property(str, lambda self: self.getGlobalStatus().name, notify=globalStatusChanged)
 
 
 class Node(BaseNode):
@@ -689,6 +823,8 @@ class Node(BaseNode):
                 ranges = self.nodeDesc.parallelization.getRanges(self)
                 if len(ranges) != len(self._chunks):
                     self._chunks.setObjectList([NodeChunk(self, range) for range in ranges])
+                    for c in self._chunks:
+                        c.statusChanged.connect(self.globalStatusChanged)
                 else:
                     for chunk, range in zip(self._chunks, ranges):
                         chunk.range = range
@@ -699,6 +835,7 @@ class Node(BaseNode):
         else:
             if len(self._chunks) != 1:
                 self._chunks.setObjectList([NodeChunk(self, desc.Range())])
+                self._chunks[0].statusChanged.connect(self.globalStatusChanged)
             else:
                 self._chunks[0].range = desc.Range()
 
@@ -738,14 +875,10 @@ class CompatibilityNode(BaseNode):
         self.splitCount = self.parallelization.get("split", 1)
         self.setSize(self.parallelization.get("size", 1))
 
-        # inputs matching current type description
-        self._commonInputs = []
         # create input attributes
         for attrName, value in self._inputs.items():
-            matchDesc = self._addAttribute(attrName, value, False)
-            # store attributes that could be used during node upgrade
-            if matchDesc:
-                self._commonInputs.append(attrName)
+            self._addAttribute(attrName, value, False)
+
         # create outputs attributes
         for attrName, value in self.outputs.items():
             self._addAttribute(attrName, value, True)
@@ -808,12 +941,12 @@ class CompatibilityNode(BaseNode):
         return desc.StringParam(**params)
 
     @staticmethod
-    def attributeDescFromName(refAttributes, name, value):
+    def attributeDescFromName(refAttributes, name, value, conform=False):
         """
         Try to find a matching attribute description in refAttributes for given attribute 'name' and 'value'.
 
         Args:
-            refAttributes ([Attribute]): reference Attributes to look for a description
+            refAttributes ([desc.Attribute]): reference Attributes to look for a description
             name (str): attribute's name
             value: attribute's value
 
@@ -822,13 +955,13 @@ class CompatibilityNode(BaseNode):
         """
         # from original node description based on attribute's name
         attrDesc = next((d for d in refAttributes if d.name == name), None)
-        if attrDesc:
-            # ensure value is valid for this description
-            try:
-                attrDesc.validateValue(value)
-            except ValueError:
-                attrDesc = None
-        return attrDesc
+        # consider this value matches description:
+        #  - if it's a serialized link expression (no proper value to set/evaluate)
+        #  - or if it passes the 'matchDescription' test
+        if attrDesc and (Attribute.isLinkExpression(value) or attrDesc.matchDescription(value, conform)):
+            return attrDesc
+
+        return None
 
     def _addAttribute(self, name, val, isOutput):
         """
@@ -901,8 +1034,16 @@ class CompatibilityNode(BaseNode):
         if not self.canUpgrade:
             raise NodeUpgradeError(self.name, "no matching node type")
         # TODO: use upgrade method of node description if available
+
+        # inputs matching current type description
+        commonInputs = []
+        for attrName, value in self._inputs.items():
+            if self.attributeDescFromName(self.nodeDesc.inputs, attrName, value, conform=True):
+                # store attributes that could be used during node upgrade
+                commonInputs.append(attrName)
+
         return Node(self.nodeType, position=self.position,
-                    **{key: value for key, value in self.inputs.items() if key in self._commonInputs})
+                    **{key: value for key, value in self.inputs.items() if key in commonInputs})
 
     compatibilityIssue = Property(int, lambda self: self.issue.value, constant=True)
     canUpgrade = Property(bool, canUpgrade.fget, constant=True)
@@ -953,23 +1094,31 @@ def nodeFactory(nodeDict, name=None):
             compatibilityIssue = CompatibilityIssue.VersionConflict
         # in other cases, check attributes compatibility between serialized node and its description
         else:
-            descAttrNames = set([attr.name for attr in nodeDesc.inputs + nodeDesc.outputs])
-            attrNames = set([name for name in list(inputs.keys()) + list(outputs.keys())])
-            if attrNames != descAttrNames:
+            # check that the node has the exact same set of inputs/outputs as its description
+            if sorted([attr.name for attr in nodeDesc.inputs]) != sorted(inputs.keys()) or \
+                    sorted([attr.name for attr in nodeDesc.outputs]) != sorted(outputs.keys()):
                 compatibilityIssue = CompatibilityIssue.DescriptionConflict
+            # verify that all inputs match their descriptions
+            for attrName, value in inputs.items():
+                if not CompatibilityNode.attributeDescFromName(nodeDesc.inputs, attrName, value):
+                    compatibilityIssue = CompatibilityIssue.DescriptionConflict
+                    break
+            # verify that all outputs match their descriptions
+            for attrName, value in outputs.items():
+                if not CompatibilityNode.attributeDescFromName(nodeDesc.outputs, attrName, value):
+                    compatibilityIssue = CompatibilityIssue.DescriptionConflict
+                    break
 
-    # no compatibility issues: instantiate a Node
     if compatibilityIssue is None:
-        n = Node(nodeType, position, **inputs)
-    # otherwise, instantiate a CompatibilityNode
+        node = Node(nodeType, position, **inputs)
     else:
         logging.warning("Compatibility issue detected for node '{}': {}".format(name, compatibilityIssue.name))
-        n = CompatibilityNode(nodeType, nodeDict, position, compatibilityIssue)
+        node = CompatibilityNode(nodeType, nodeDict, position, compatibilityIssue)
         # retro-compatibility: no internal folder saved
         # can't spawn meaningful CompatibilityNode with precomputed outputs
         # => automatically try to perform node upgrade
         if not internalFolder and nodeDesc:
             logging.warning("No serialized output data: performing automatic upgrade on '{}'".format(name))
-            n = n.upgrade()
+            node = node.upgrade()
 
-    return n
+    return node
