@@ -1,4 +1,4 @@
-__version__ = "2.0"
+__version__ = "3.0"
 
 import json
 
@@ -12,7 +12,7 @@ def findMetadata(d, keys, defaultValue):
         k = key.lower()
         if v is not None:
             return v
-        for dk, dv in d.iteritems():
+        for dk, dv in d.items():
             dkm = dk.lower().replace(" ", "")
             if dkm == key.lower():
                 return dv
@@ -76,11 +76,12 @@ class LdrToHdrSampling(desc.CommandLineNode):
         ),
         desc.BoolParam(
             name='byPass',
-            label='bypass convert',
+            label='Bypass',
             description="Bypass HDR creation and use the medium bracket as the source for the next steps",
             value=False,
             uid=[0],
             group='internal',
+            enabled= lambda node: node.nbBrackets.value != 1,
         ),
         desc.IntParam(
             name='channelQuantizationPower',
@@ -90,6 +91,7 @@ class LdrToHdrSampling(desc.CommandLineNode):
             range=(8, 14, 1),
             uid=[0],
             advanced=True,
+            enabled= lambda node: node.byPass.enabled and not node.byPass.value,
         ),
         desc.IntParam(
             name='blockSize',
@@ -99,6 +101,7 @@ class LdrToHdrSampling(desc.CommandLineNode):
             range=(8, 1024, 1),
             uid=[0],
             advanced=True,
+            enabled= lambda node: node.byPass.enabled and not node.byPass.value,
         ),
         desc.IntParam(
             name='radius',
@@ -108,6 +111,7 @@ class LdrToHdrSampling(desc.CommandLineNode):
             range=(0, 10, 1),
             uid=[0],
             advanced=True,
+            enabled= lambda node: node.byPass.enabled and not node.byPass.value,
         ),
         desc.IntParam(
             name='maxCountSample',
@@ -117,6 +121,15 @@ class LdrToHdrSampling(desc.CommandLineNode):
             range=(10, 1000, 10),
             uid=[0],
             advanced=True,
+            enabled= lambda node: node.byPass.enabled and not node.byPass.value,
+        ),
+        desc.BoolParam(
+            name='debug',
+            label='Export Debug Files',
+            description="Export debug files to analyze the sampling strategy.",
+            value=False,
+            uid=[],
+            enabled= lambda node: node.byPass.enabled and not node.byPass.value,
         ),
         desc.ChoiceParam(
             name='verboseLevel',
@@ -140,7 +153,7 @@ class LdrToHdrSampling(desc.CommandLineNode):
     ]
 
     def processChunk(self, chunk):
-        if chunk.node.byPass.value:
+        if chunk.node.nbBrackets.value == 1 or chunk.node.byPass.value:
             return
         super(LdrToHdrSampling, self).processChunk(chunk)
 
@@ -163,7 +176,12 @@ class LdrToHdrSampling(desc.CommandLineNode):
         if not cameraInitOutput.node.hasAttribute('viewpoints'):
             if cameraInitOutput.node.hasAttribute('input'):
                 cameraInitOutput = cameraInitOutput.node.input.getLinkParam(recursive=True)
-        viewpoints = cameraInitOutput.node.viewpoints.value
+        if cameraInitOutput and cameraInitOutput.node and cameraInitOutput.node.hasAttribute('viewpoints'):
+            viewpoints = cameraInitOutput.node.viewpoints.value
+        else:
+            # No connected CameraInit
+            node.nbBrackets.value = 0
+            return
 
         # logging.info("[LDRToHDR] Update start: nb viewpoints:" + str(len(viewpoints)))
         inputs = []
@@ -197,7 +215,12 @@ class LdrToHdrSampling(desc.CommandLineNode):
         exposures = None
         bracketSizes = set()
         if len(exposureGroups) == 1:
-            node.nbBrackets.value = 1
+            if len(set(exposureGroups[0])) == 1:
+                # Single exposure and multiple views
+                node.nbBrackets.value = 1
+            else:
+                # Single view and multiple exposures
+                node.nbBrackets.value = len(exposureGroups[0])
         else:
             for expGroup in exposureGroups:
                 bracketSizes.add(len(expGroup))
