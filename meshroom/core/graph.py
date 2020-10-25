@@ -223,8 +223,11 @@ class Graph(BaseObject):
     def clear(self):
         self.header.clear()
         self._compatibilityNodes.clear()
-        self._nodes.clear()
         self._edges.clear()
+        # Tell QML nodes are going to be deleted
+        for node in self._nodes:
+            node.alive = False
+        self._nodes.clear()
 
     @property
     def fileFeatures(self):
@@ -437,6 +440,7 @@ class Graph(BaseObject):
                 self.removeEdge(edge.dst)
                 inEdges[edge.dst.getFullName()] = edge.src.getFullName()
 
+            node.alive = False
             self._nodes.remove(node)
             self.update()
 
@@ -1174,7 +1178,8 @@ def submitGraph(graph, submitter, toNodes=None):
         sub = meshroom.core.submitters.get(submitter, None)
     elif len(meshroom.core.submitters) == 1:
         # if only one submitter available use it
-        sub = meshroom.core.submitters.values()[0]
+        allSubmitters = meshroom.core.submitters.values()
+        sub = next(iter(allSubmitters))  # retrieve the first element
     if sub is None:
         raise RuntimeError("Unknown Submitter: '{submitter}'. Available submitters are: '{allSubmitters}'.".format(
             submitter=submitter, allSubmitters=str(meshroom.core.submitters.keys())))
