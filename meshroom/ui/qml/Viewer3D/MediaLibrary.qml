@@ -203,11 +203,12 @@ Entity {
                 property string rawSource: attribute ? attribute.value : model.source
                 // whether dependencies are statified (applies for output/connected input attributes only)
                 readonly property bool dependencyReady: {
-                    if(attribute && attribute.isOutput)
-                        return attribute.node.globalStatus === "SUCCESS";
-                    if(attribute && attribute.isLink)
-                        return attribute.linkParam.node.globalStatus === "SUCCESS";
-                    return true;
+                    if(attribute) {
+                        const rootAttribute = attribute.isLink ? attribute.rootLinkParam : attribute
+                        if(rootAttribute.isOutput)
+                            return rootAttribute.node.globalStatus === "SUCCESS"
+                    }
+                    return true // is an input param without link (so no dependency) or an external file
                 }
                 // source based on raw source + dependency status
                 property string currentSource: dependencyReady ? rawSource : ""
@@ -217,7 +218,7 @@ Entity {
                 // To use only if we want to draw the input source and not the current node output (Warning: to use with caution)
                 // There is maybe a better way to do this to avoid overwritting bindings which should be readonly properties
                 function drawInputSource() {
-                    rawSource = Qt.binding(() => instantiatedEntity.currentNode.attribute("input").value)
+                    rawSource = Qt.binding(() => instantiatedEntity.currentNode ? instantiatedEntity.currentNode.attribute("input").value: "")
                     currentSource = Qt.binding(() => rawSource)
                     finalSource = Qt.binding(() => rawSource)
                 }
@@ -230,8 +231,14 @@ Entity {
                 // Use the object as NodeInstantiator model to be notified of its deletion
                 NodeInstantiator {
                     model: attribute
-                    delegate: Entity { objectName: "DestructionWatcher [" + attribute.toString() + "]" }
-                    onObjectRemoved: remove(idx)
+                    delegate: Entity { objectName: "DestructionWatcher [" + model.toString() + "]" }
+                    onObjectRemoved: remove(index)
+                }
+
+                property bool alive: attribute ? attribute.node.alive : false
+                onAliveChanged: {
+                    if(!alive && index >= 0)
+                          remove(index)
                 }
 
                 // 'visible' property drives media loading request
@@ -246,7 +253,7 @@ Entity {
                 }
 
                 function updateCacheAndModel(forceRequest) {
-                    // don't cache explicitely unloaded media
+                    // don't cache explicitly unloaded media
                     if(model.requested && object && dependencyReady) {
                         // cache current object
                         if(cache.add(Filepath.urlToString(mediaLoader.source), object));
@@ -267,7 +274,7 @@ Entity {
 
                 Component.onCompleted: {
                     // keep 'source' -> 'entity' reference
-                    m.sourceToEntity[modelSource] = mediaLoader;
+                    m.sourceToEntity[modelSource] = instantiatedEntity;
                     // always request media loading when delegate has been created
                     updateModel(true);
                     // if external media failed to open, remove element from model
@@ -308,9 +315,10 @@ Entity {
                             model[prop] = Qt.binding(function() { return object ? object[prop] : 0; });
                         })
                     }
-                    else if(finalSource) {
+                    else if(finalSource && status === Component.Ready) {
                         // source was valid but no loader was created, remove element
-                        remove(index);
+                        // check if component is ready to avoid removing element from the model before adding instance to the node
+                        remove(index)
                     }
                 }
 
@@ -381,7 +389,8 @@ Entity {
         }
 
         onObjectRemoved: {
-            delete m.sourceToEntity[object.modelSource];
+            if(m.sourceToEntity[object.modelSource])
+                delete m.sourceToEntity[object.modelSource]
         }
     }
 }

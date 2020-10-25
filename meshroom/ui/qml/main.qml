@@ -340,12 +340,12 @@ ApplicationWindow {
                     onTriggered: ensureSaved(function() { _reconstruction.new("photogrammetry") })
                 }
                 Action {
-                    text: "HDRI"
-                    onTriggered: ensureSaved(function() { _reconstruction.new("hdri") })
+                    text: "Panorama HDR"
+                    onTriggered: ensureSaved(function() { _reconstruction.new("panoramahdr") })
                 }
                 Action {
-                    text: "HDRI Fisheye"
-                    onTriggered: ensureSaved(function() { _reconstruction.new("hdriFisheye") })
+                    text: "Panorama Fisheye HDR"
+                    onTriggered: ensureSaved(function() { _reconstruction.new("panoramafisheyehdr") })
                 }
             }
             Action {
@@ -411,7 +411,12 @@ ApplicationWindow {
                 id: saveAsAction
                 text: "Save As..."
                 shortcut: "Ctrl+Shift+S"
-                onTriggered: saveFileDialog.open()
+                onTriggered: {
+                    if(_reconstruction.graph && _reconstruction.graph.filepath) {
+                        saveFileDialog.folder = Filepath.stringToUrl(Filepath.dirname(_reconstruction.graph.filepath))
+                    }
+                    saveFileDialog.open()
+                }
             }
             MenuSeparator { }
             Action {
