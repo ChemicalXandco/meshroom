@@ -63,7 +63,7 @@ It iterates like that, adding cameras and triangulating new 2D features into 3D 
     inputs = [
         desc.File(
             name='input',
-            label='Input',
+            label='SfMData',
             description='SfMData file.',
             value='',
             uid=[0],
@@ -97,7 +97,7 @@ It iterates like that, adding cameras and triangulating new 2D features into 3D 
             label='Describer Types',
             description='Describer types used to describe an image.',
             value=['sift'],
-            values=['sift', 'sift_float', 'sift_upright', 'akaze', 'akaze_liop', 'akaze_mldb', 'cctag3', 'cctag4', 'sift_ocv', 'akaze_ocv'],
+            values=['sift', 'sift_float', 'sift_upright', 'dspsift', 'akaze', 'akaze_liop', 'akaze_mldb', 'cctag3', 'cctag4', 'sift_ocv', 'akaze_ocv'],
             exclusive=False,
             uid=[0],
             joinChar=',',
@@ -324,14 +324,14 @@ It iterates like that, adding cameras and triangulating new 2D features into 3D 
     outputs = [
         desc.File(
             name='output',
-            label='Output SfMData File',
+            label='SfMData',
             description='Path to the output sfmdata file',
             value=desc.Node.internalFolder + 'sfm.abc',
             uid=[],
         ),
         desc.File(
             name='outputViewsAndPoses',
-            label='Output Poses',
+            label='Views and Poses',
             description='''Path to the output sfmdata file with cameras (views and poses).''',
             value=desc.Node.internalFolder + 'cameras.sfm',
             uid=[],

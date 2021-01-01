@@ -188,6 +188,13 @@ The metadata needed are:
             joinChar=',',
             advanced=True,
         ),
+        desc.BoolParam(
+            name='useInternalWhiteBalance',
+            label='Apply internal white balance',
+            description='Apply image white balance (Only for raw images)',
+            value=True,
+            uid=[0],
+        ),
         desc.ChoiceParam(
             name='viewIdMethod',
             label='ViewId Method',
@@ -227,7 +234,7 @@ The metadata needed are:
     outputs = [
         desc.File(
             name='output',
-            label='Output SfMData File',
+            label='SfMData',
             description='''Output SfMData.''',
             value=desc.Node.internalFolder + 'cameraInit.sfm',
             uid=[],

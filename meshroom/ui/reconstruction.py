@@ -111,7 +111,7 @@ class LiveSfmManager(QObject):
         to include those images to the reconstruction.
         """
         # Get all new images in the watched folder
-        imagesInFolder = multiview.findFilesByTypeInFolder(self._folder)
+        imagesInFolder = multiview.findFilesByTypeInFolder(self._folder).images
         newImages = set(imagesInFolder).difference(self.allImages)
         for imagePath in newImages:
             # print('[LiveSfmManager] New image file : {}'.format(imagePath))
@@ -419,8 +419,8 @@ class Reconstruction(UIGraph):
         "allDepthMap": ["DepthMap", "DepthMapFilter"],
     }
 
-    def __init__(self, defaultPipeline='', parent=None):
-        super(Reconstruction, self).__init__(parent)
+    def __init__(self, undoStack, taskManager, defaultPipeline='', parent=None):
+        super(Reconstruction, self).__init__(undoStack, taskManager, parent)
 
         # initialize member variables for key steps of the 3D reconstruction pipeline
 
@@ -473,7 +473,7 @@ class Reconstruction(UIGraph):
 
     def onCameraInitChanged(self):
         # Update active nodes when CameraInit changes
-        nodes = self._graph.nodesFromNode(self._cameraInit)[0]
+        nodes = self._graph.dfsOnDiscover(startNodes=[self._cameraInit], reverse=True)[0]
         self.setActiveNodes(nodes)
 
     @Slot()
@@ -651,7 +651,7 @@ class Reconstruction(UIGraph):
         """
         if not startNode:
             return None
-        nodes = self._graph.nodesFromNode(startNode, nodeTypes)[0]
+        nodes = self._graph.dfsOnDiscover(startNodes=[startNode], filterTypes=nodeTypes, reverse=True)[0]
         if not nodes:
             return None
         node = nodes[-1]
