@@ -1,9 +1,9 @@
-import QtQuick 2.7
+import QtQuick 2.15
 import QtQuick.Controls 2.3
 import QtQuick.Layouts 1.3
 import MaterialIcons 2.2
-import Qt3D.Core 2.0
-import Qt3D.Render 2.1
+import Qt3D.Core 2.15
+import Qt3D.Render 2.15
 import QtQuick.Controls.Material 2.4
 import Controls 1.0
 import Utils 1.0
@@ -185,12 +185,14 @@ FloatingPane {
 
                 Connections {
                     target: uigraph
-                    onSelectedNodeChanged: mediaListView.currentIndex = -1
+                    function onSelectedNodeChanged() {
+                        mediaListView.currentIndex = -1
+                    }
                 }
 
                 Connections {
                     target: mediaLibrary
-                    onLoadRequest: {
+                    function onLoadRequest() {
                         mediaListView.positionViewAtIndex(idx, ListView.Visible);
                     }
                 }

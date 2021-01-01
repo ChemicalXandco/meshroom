@@ -1,7 +1,6 @@
-import QtQuick 2.7
-import Utils 1.0
+import QtQuick 2.15
 
-//import "common.js" as Common
+import "common.js" as Common
 
 ListView {
     id: root
