@@ -1,4 +1,4 @@
-import QtQuick 2.7
+import QtQuick 2.15
 import QtQuick.Controls 2.3
 import QtQuick.Layouts 1.3
 import MaterialIcons 2.2
@@ -103,7 +103,7 @@ Panel {
             // Update grid current item when selected view changes
             Connections {
                 target: _reconstruction
-                onSelectedViewIdChanged: {
+                function onSelectedViewIdChanged() {
                     var idx = grid.model.find(_reconstruction.selectedViewId, "viewId")
                     if(idx >= 0)
                         grid.currentIndex = idx
